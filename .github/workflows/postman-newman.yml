@@ -1,0 +1,62 @@
+name: Postman/Newman
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  newman:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install server deps
+        working-directory: server
+        run: npm ci
+
+      - name: Start API
+        working-directory: server
+        run: |
+          npm start &
+          # Espera hasta 60s a que /health responda 200
+          for i in {1..60}; do
+            if curl -sf http://localhost:3000/health >/dev/null; then
+              echo "API ready"; break
+            fi
+            echo "Waiting API ($i/60) ..."
+            sleep 1
+          done
+          # Verificación final (si falla, aborta el job aquí)
+          curl -sf http://localhost:3000/health >/dev/null
+
+      - name: Install Newman + reporter
+        run: npm i -g newman newman-reporter-htmlextra
+
+      - name: Run Newman (HTML bonito)
+        run: |
+          newman run "postman/API Testing Demo.postman_collection.json" \
+            -r cli,htmlextra \
+            --reporter-htmlextra-export "postman/newman-report.html" \
+            --reporter-htmlextra-title "API Demo – Newman Report" \
+            --reporter-htmlextra-browserTitle "API Demo" \
+            --reporter-htmlextra-logs \
+            --reporter-htmlextra-testPaging \
+            --reporter-htmlextra-omitHeaders \
+            --reporter-htmlextra-omitRequestBodies \
+            --reporter-htmlextra-omitResponseBodies \
+            --env-var base_url=http://localhost:3000
+
+      - name: Upload Newman HTML report
+        if: always()   # sube el reporte aunque fallen tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: postman/newman-report.html

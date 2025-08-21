@@ -1,0 +1,205 @@
+{
+  "info": {
+    "name": "API Testing Demo",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] } }
+    },
+    {
+      "name": "Auth - Login (admin)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', ()=> pm.response.to.have.status(200));",
+            "pm.collectionVariables.set('token', pm.response.json().token);"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"admin@example.com\",\"password\":\"secret\"}" },
+        "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth","login"] }
+      }
+    },
+    {
+      "name": "Users - Create",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.request.headers.upsert({ key:'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') });"
+          ] }
+        },
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('201 created', ()=> pm.response.to.have.status(201));",
+            "pm.collectionVariables.set('created_user_id', pm.response.json().id);"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"new.user@example.com\",\"name\":\"New User\",\"role\":\"user\"}" },
+        "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] }
+      }
+    },
+    {
+      "name": "Users - Get by ID",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.request.headers.upsert({ key:'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') });"
+          ] }
+        },
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 ok', ()=> pm.response.to.have.status(200));"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/users/{{created_user_id}}", "host": ["{{base_url}}"], "path": ["users","{{created_user_id}}"] }
+      }
+    },
+    {
+      "name": "Security - Missing token → 401",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('401 unauthorized', ()=> pm.response.to.have.status(401));"
+          ] }
+        }
+      ],
+      "request": { "method": "GET", "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] } }
+    },
+    {
+      "name": "Auth - Login (user)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', ()=> pm.response.to.have.status(200));",
+            "pm.collectionVariables.set('token_user', pm.response.json().token);",
+            "postman.setNextRequest('Users - Delete (as non-admin → 403)');"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"user@example.com\",\"password\":\"secret\"}" },
+        "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth","login"] }
+      }
+    },
+    {
+      "name": "Users - Delete (as non-admin → 403)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": { "type": "text/javascript", "exec": [
+            "const t = pm.collectionVariables.get('token_user');",
+            "pm.expect(t,'token_user debe existir').to.be.a('string').and.not.empty;",
+            "pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + t });"
+          ] }
+        },
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('403 forbidden', ()=> pm.response.to.have.status(403));"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "url": { "raw": "{{base_url}}/users/{{created_user_id}}", "host": ["{{base_url}}"], "path": ["users","{{created_user_id}}"] }
+      }
+    },
+    {
+      "name": "Users - Delete (as admin → 204)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') });"
+          ] }
+        },
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('204 no content', ()=> pm.response.to.have.status(204));"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "url": { "raw": "{{base_url}}/users/{{created_user_id}}", "host": ["{{base_url}}"], "path": ["users","{{created_user_id}}"] }
+      }
+    },
+    {
+      "name": "Auth - Login (short token 2s)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', ()=> pm.response.to.have.status(200));",
+            "pm.collectionVariables.set('short_token', pm.response.json().token);",
+            "postman.setNextRequest('Delay 3s (wait for expiry)');"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"admin@example.com\",\"password\":\"secret\",\"expOverrideSec\":2}" },
+        "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth","login"] }
+      }
+    },
+    {
+      "name": "Delay 3s (wait for expiry)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('delayed ok', ()=> pm.response.to.have.status(200));",
+            "postman.setNextRequest('Security - Expired token → 401 (deterministic)');"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "https://postman-echo.com/delay/3", "protocol": "https", "host": ["postman-echo","com"], "path": ["delay","3"] }
+      }
+    },
+    {
+      "name": "Security - Expired token → 401 (deterministic)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": [
+            "pm.test('401 after token expiry', ()=> pm.response.to.have.status(401));",
+            "postman.setNextRequest(null);"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{short_token}}" }],
+        "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] }
+      }
+    }
+  ]
+}
