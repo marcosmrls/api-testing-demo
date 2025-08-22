@@ -2,18 +2,20 @@ name: Postman/Newman
 
 on:
   push:
-  pull_request:
+    branches: [ main ]      # producción solo en main
+  pull_request:             # PR: corre pruebas + preview
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write         # para Pages
-  id-token: write      # para Pages
-  checks: write        # para publicar el check con JUnit
+  pages: write              # para Pages (deploy/preview)
+  id-token: write           # para Pages
+  checks: write             # para publicar el check con JUnit
 
+# evita colas de Pages (mantén solo el último run por rama)
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   newman:
@@ -28,12 +30,19 @@ jobs:
         with:
           node-version: 20
 
+      - name: Print Node/npm versions
+        run: |
+          node -v
+          npm -v
+
       - name: Install server deps (ci if lock, otherwise install)
         working-directory: server
         run: |
           if [ -f package-lock.json ]; then
+            echo "Using npm ci (lockfile found)"
             npm ci
           else
+            echo "No package-lock.json found, using npm install"
             npm install
           fi
 
@@ -42,10 +51,13 @@ jobs:
         run: |
           npm start &
           for i in {1..90}; do
-            curl -sf http://localhost:3000/health && break
-            echo "Waiting API ($i/90) ..." && sleep 1
+            if curl -sf http://localhost:3000/health >/dev/null; then
+              echo "API ready"; break
+            fi
+            echo "Waiting API ($i/90) ..."
+            sleep 1
           done
-          curl -sf http://localhost:3000/health
+          curl -sf http://localhost:3000/health >/dev/null
 
       - name: Install Newman + reporters
         run: npm i -g newman newman-reporter-htmlextra
@@ -55,9 +67,19 @@ jobs:
           newman run "postman/API Testing Demo.postman_collection.json" \
             -r cli,htmlextra,junit,json \
             --reporter-htmlextra-export "postman/newman-report.html" \
+            --reporter-htmlextra-title "API Demo – Newman Report" \
+            --reporter-htmlextra-browserTitle "API Demo" \
+            --reporter-htmlextra-logs \
+            --reporter-htmlextra-testPaging \
+            --reporter-htmlextra-omitHeaders \
+            --reporter-htmlextra-omitRequestBodies \
+            --reporter-htmlextra-omitResponseBodies \
             --reporter-junit-export "postman/newman-junit.xml" \
             --reporter-json-export "postman/newman.json" \
             --env-var base_url=http://localhost:3000
+
+      - name: Install jq (for summary)
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Job Summary (tabla rápida)
         run: |
@@ -78,7 +100,8 @@ jobs:
           reporter: java-junit
           fail-on-error: false
 
-      - name: Preparar sitio (Pages)
+      # preparar el artifact de Pages (HTML)
+      - name: Build Pages site
         run: |
           mkdir -p site
           cp postman/newman-report.html site/index.html
@@ -88,16 +111,53 @@ jobs:
         with:
           path: site
 
+      - name: Upload Newman HTML (fallback)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: postman/newman-report.html
+
+      - name: Upload Newman JUnit (fallback)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-junit
+          path: postman/newman-junit.xml
+
+  # Preview para PRs (más rápido que producción)
+  preview:
+    needs: newman
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy preview to GitHub Pages
+        id: preview
+        uses: actions/deploy-pages@v4
+        with:
+          preview: true
+
+      - name: Add Pages preview link to summary
+        if: always()
+        run: |
+          echo "### 🔗 Reporte (Preview) en Pages" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.preview.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+
+  # Producción: solo en main
   deploy:
     needs: newman
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Add Pages link to summary
+        if: always()
+        run: |
+          echo "### 🔗 Reporte (Producción) en Pages" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
