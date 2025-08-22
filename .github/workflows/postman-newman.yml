@@ -18,32 +18,44 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install server deps
+      - name: Print Node/npm versions
+        run: |
+          node -v
+          npm -v
+
+      - name: Install server deps (ci if lock, otherwise install)
         working-directory: server
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "Using npm ci (lockfile found)"
+            npm ci
+          else
+            echo "No package-lock.json found, using npm install"
+            npm install
+          fi
 
       - name: Start API
         working-directory: server
         run: |
           npm start &
-          # Espera hasta 60s a que /health responda 200
-          for i in {1..60}; do
+          # Espera hasta 90s a que /health responda 200
+          for i in {1..90}; do
             if curl -sf http://localhost:3000/health >/dev/null; then
               echo "API ready"; break
             fi
-            echo "Waiting API ($i/60) ..."
+            echo "Waiting API ($i/90) ..."
             sleep 1
           done
-          # Verificación final (si falla, aborta el job aquí)
+          # Verificación final (si falla, aborta)
           curl -sf http://localhost:3000/health >/dev/null
 
       - name: Install Newman + reporter
         run: npm i -g newman newman-reporter-htmlextra
 
-      - name: Run Newman (HTML bonito)
+      - name: Run Newman (HTML + JUnit)
         run: |
           newman run "postman/API Testing Demo.postman_collection.json" \
-            -r cli,htmlextra \
+            -r cli,htmlextra,junit \
             --reporter-htmlextra-export "postman/newman-report.html" \
             --reporter-htmlextra-title "API Demo – Newman Report" \
             --reporter-htmlextra-browserTitle "API Demo" \
@@ -52,11 +64,19 @@ jobs:
             --reporter-htmlextra-omitHeaders \
             --reporter-htmlextra-omitRequestBodies \
             --reporter-htmlextra-omitResponseBodies \
+            --reporter-junit-export "postman/newman-junit.xml" \
             --env-var base_url=http://localhost:3000
 
       - name: Upload Newman HTML report
-        if: always()   # sube el reporte aunque fallen tests
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: newman-report
           path: postman/newman-report.html
+
+      - name: Upload Newman JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-junit
+          path: postman/newman-junit.xml
